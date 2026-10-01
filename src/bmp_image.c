@@ -226,7 +226,7 @@ _add_padding (struct bmp_image *image)
   image->pixels = output_pixels;
 }
 static void
-convolution (struct bmp_image *image, int **kernel)
+convolution (struct bmp_image *image, const double kernel[3][3])
 {
   struct pixel **output_pixels = (struct pixel **)malloc (
       image->header.height * sizeof (struct pixel *));
@@ -236,10 +236,9 @@ convolution (struct bmp_image *image, int **kernel)
                                                  * sizeof (struct pixel));
     }
   _add_padding (image);
-  // int kernel[3][3]={{-1,-2,-1},{0,0,0},{1,2,1}};
-  int r_sum = 0;
-  int g_sum = 0;
-  int b_sum = 0;
+  double r_sum = 0;
+  double g_sum = 0;
+  double b_sum = 0;
   for (int i = PADDING_OFFSET; i < image->header.height + PADDING_OFFSET; i++)
     {
       for (int j = PADDING_OFFSET; j < image->header.width + PADDING_OFFSET;
@@ -262,15 +261,18 @@ convolution (struct bmp_image *image, int **kernel)
                            * (image->pixels[x_idx][y_idx].green);
                 }
             }
+          // edge kernels produce negative responses, take the magnitude and
+          // clamp so the result fits in a byte instead of wrapping around
           output_pixels[i - PADDING_OFFSET][j - PADDING_OFFSET].red
-              = (int)r_sum / 9;
+              = min ((int)lround (fabs (r_sum)), 255);
           output_pixels[i - PADDING_OFFSET][j - PADDING_OFFSET].green
-              = (int)g_sum / 9;
+              = min ((int)lround (fabs (g_sum)), 255);
           output_pixels[i - PADDING_OFFSET][j - PADDING_OFFSET].blue
-              = (int)b_sum / 9;
+              = min ((int)lround (fabs (b_sum)), 255);
         }
     }
-  for (int i = 0; i < image->header.height; i++)
+  // the padded image has 2*PADDING_OFFSET more rows than the header says
+  for (int i = 0; i < image->header.height + 2 * PADDING_OFFSET; i++)
     {
       free (image->pixels[i]);
     }
@@ -307,28 +309,16 @@ convolution (struct bmp_image *image, int **kernel)
 void
 blur (struct bmp_image *image)
 {
-  int kernel[3][3] = { { 1, 1, 1 }, { 1, 1, 1 }, { 1, 1, 1 } };
-  int **kernel_ptr = (int **)malloc (3 * sizeof (int *));
-  for (int i = 0; i < 3; i++)
-    {
-      kernel_ptr[i] = (int *)malloc (3 * sizeof (int));
-      for (int j = 0; j < 3; j++)
-        {
-          kernel_ptr[i][j] = kernel[i][j];
-        }
-    }
-  convolution (image, kernel_ptr);
-  for (int i = 0; i < 3; i++)
-    {
-      free (kernel_ptr[i]);
-    }
-  free (kernel_ptr);
+  const double kernel[3][3] = { { 1.0 / 9, 1.0 / 9, 1.0 / 9 },
+                                { 1.0 / 9, 1.0 / 9, 1.0 / 9 },
+                                { 1.0 / 9, 1.0 / 9, 1.0 / 9 } };
+  convolution (image, kernel);
 }
 
 void
 g_blur (struct bmp_image *image, double sigma)
 {
-  int kernel[3][3];
+  double kernel[3][3];
   double sum = 0;
   for (int i = 0; i < 3; i++)
     {
@@ -347,65 +337,23 @@ g_blur (struct bmp_image *image, double sigma)
           kernel[i][j] /= sum;
         }
     }
-  int **kernel_ptr = (int **)malloc (3 * sizeof (int *));
-  for (int i = 0; i < 3; i++)
-    {
-      kernel_ptr[i] = (int *)malloc (3 * sizeof (int));
-      for (int j = 0; j < 3; j++)
-        {
-          kernel_ptr[i][j] = kernel[i][j];
-        }
-    }
-  convolution (image, kernel_ptr);
-  for (int i = 0; i < 3; i++)
-    {
-      free (kernel_ptr[i]);
-    }
-  free (kernel_ptr);
+  convolution (image, (const double(*)[3])kernel);
 }
 
 void
 v_edge (struct bmp_image *image)
 {
   convert_to_bw (image);
-  int kernel[3][3] = { { -1, 0, 1 }, { -2, 0, 2 }, { -1, 0, 1 } };
-  int **kernel_ptr = (int **)malloc (3 * sizeof (int *));
-  for (int i = 0; i < 3; i++)
-    {
-      kernel_ptr[i] = (int *)malloc (3 * sizeof (int));
-      for (int j = 0; j < 3; j++)
-        {
-          kernel_ptr[i][j] = kernel[i][j];
-        }
-    }
-  convolution (image, kernel_ptr);
-  for (int i = 0; i < 3; i++)
-    {
-      free (kernel_ptr[i]);
-    }
-  free (kernel_ptr);
+  const double kernel[3][3] = { { -1, 0, 1 }, { -2, 0, 2 }, { -1, 0, 1 } };
+  convolution (image, kernel);
 }
 
 void
 h_edge (struct bmp_image *image)
 {
   convert_to_bw (image);
-  int kernel[3][3] = { { -1, -2, -1 }, { 0, 0, 0 }, { 1, 2, 1 } };
-  int **kernel_ptr = (int **)malloc (3 * sizeof (int *));
-  for (int i = 0; i < 3; i++)
-    {
-      kernel_ptr[i] = (int *)malloc (3 * sizeof (int));
-      for (int j = 0; j < 3; j++)
-        {
-          kernel_ptr[i][j] = kernel[i][j];
-        }
-    }
-  convolution (image, kernel_ptr);
-  for (int i = 0; i < 3; i++)
-    {
-      free (kernel_ptr[i]);
-    }
-  free (kernel_ptr);
+  const double kernel[3][3] = { { -1, -2, -1 }, { 0, 0, 0 }, { 1, 2, 1 } };
+  convolution (image, kernel);
 }
 
 void
