@@ -1,26 +1,41 @@
 #include "include/bmp_image.h"
-#include "math.h"
+#include <math.h>
+
+// bmp rows are padded to a multiple of 4 bytes
+static uint32_t
+_row_size (int32_t width)
+{
+  return ((uint32_t)width * sizeof (struct pixel) + 3) & ~3u;
+}
 
 static struct bmp_header
 _read_header (FILE *bmp_file, char *file_path)
 {
   struct bmp_header header;
-  fread (&header, sizeof (struct bmp_header), 1, bmp_file);
-  if (header.signature != 0x4D42)
+  if (fread (&header, sizeof (struct bmp_header), 1, bmp_file) != 1)
     {
-      printf (
-          "erorr [bmp_image:_read_header]->unvalid signature from %s.expected "
-          "0X4D41 got %04Xd",
-          file_path, header.signature);
+      fprintf (stderr,
+               "error [bmp_image:_read_header]->couldn't read header from %s\n",
+               file_path);
       fclose (bmp_file);
       exit (1);
     }
-  uint8_t *bmp_content = (uint8_t *)malloc (header.file_size);
-  if (bmp_content == NULL)
+  if (header.signature != 0x4D42)
     {
-      printf (
-          "error [bmp_image:_read_header]->memory allocation failed for %s",
-          file_path);
+      fprintf (stderr,
+               "error [bmp_image:_read_header]->invalid signature from "
+               "%s.expected 0x4D42 got 0x%04X\n",
+               file_path, header.signature);
+      fclose (bmp_file);
+      exit (1);
+    }
+  if (header.bit_depth != 24 || header.compression != 0 || header.width <= 0
+      || header.height == 0)
+    {
+      fprintf (stderr,
+               "error [bmp_image:_read_header]->unsupported bitmap %s.only "
+               "uncompressed 24bit bitmaps are supported\n",
+               file_path);
       fclose (bmp_file);
       exit (1);
     }
@@ -30,24 +45,49 @@ _read_header (FILE *bmp_file, char *file_path)
 static struct pixel **
 _read_pixels (FILE *bmp_file, char *file_path, struct bmp_header *header)
 {
+  // negative height means rows are stored top-down. store them bottom-up
+  // like every other bitmap so the rest of the code only deals with one case
+  int top_down = header->height < 0;
+  if (top_down)
+    {
+      header->height = -header->height;
+    }
+  uint32_t row_size = _row_size (header->width);
   struct pixel **pixels
       = (struct pixel **)malloc (header->height * sizeof (struct pixel *));
-  for (int i = 0; i < header->height; i++)
-    {
-      pixels[i]
-          = (struct pixel *)malloc (header->width * sizeof (struct pixel));
-    }
   if (pixels == NULL)
     {
-      printf (
-          "error [bmp_image:_read_pixels]->memory allocation failed for %s",
-          file_path);
+      fprintf (stderr,
+               "error [bmp_image:_read_pixels]->memory allocation failed for "
+               "%s\n",
+               file_path);
       exit (1);
+    }
+  for (int i = 0; i < header->height; i++)
+    {
+      // allocate the padded row size so the whole row can be read at once
+      pixels[i] = (struct pixel *)malloc (row_size);
+      if (pixels[i] == NULL)
+        {
+          fprintf (stderr,
+                   "error [bmp_image:_read_pixels]->memory allocation failed "
+                   "for %s\n",
+                   file_path);
+          exit (1);
+        }
     }
   fseek (bmp_file, header->data_offset, SEEK_SET);
   for (int i = 0; i < header->height; i++)
     {
-      fread (pixels[i], sizeof (struct pixel), header->width, bmp_file);
+      int row = top_down ? header->height - 1 - i : i;
+      if (fread (pixels[row], 1, row_size, bmp_file) != row_size)
+        {
+          fprintf (stderr,
+                   "error [bmp_image:_read_pixels]->unexpected end of file in "
+                   "%s\n",
+                   file_path);
+          exit (1);
+        }
     }
   return pixels;
 }
@@ -58,13 +98,21 @@ read_img (char *file_path)
   FILE *bmp_file = fopen (file_path, "rb");
   if (bmp_file == NULL)
     {
-      printf ("error [bmp_image:read_img]->couldn't open file %s", file_path);
+      fprintf (stderr, "error [bmp_image:read_img]->couldn't open file %s\n",
+               file_path);
       exit (1);
     }
   struct bmp_header header = _read_header (bmp_file, file_path);
   struct pixel **pixels = _read_pixels (bmp_file, file_path, &header);
   struct bmp_image *image
       = (struct bmp_image *)malloc (sizeof (struct bmp_image));
+  if (image == NULL)
+    {
+      fprintf (stderr,
+               "error [bmp_image:read_img]->memory allocation failed for %s\n",
+               file_path);
+      exit (1);
+    }
   image->file_path = file_path;
   image->header = header;
   image->pixels = pixels;
@@ -78,15 +126,27 @@ write_img (struct bmp_image *image, char *file_name)
   FILE *bmp_file = fopen (file_name, "wb");
   if (bmp_file == NULL)
     {
-      printf ("error [bmp_image:write_img]->couldn't open file %s\n",
-              file_name);
+      fprintf (stderr, "error [bmp_image:write_img]->couldn't open file %s\n",
+               file_name);
       exit (1);
     }
-  fwrite (&image->header, sizeof (struct bmp_header), 1, bmp_file);
-  for (int i = 0; i < image->header.height; i++)
+  // only the 40 byte info header and the pixels are written, so the offsets
+  // and sizes from the source file have to be recomputed
+  uint32_t row_size = _row_size (image->header.width);
+  uint32_t row_bytes = image->header.width * sizeof (struct pixel);
+  struct bmp_header header = image->header;
+  header.data_offset = sizeof (struct bmp_header);
+  header.header_size = 40;
+  header.image_size = row_size * header.height;
+  header.file_size = header.data_offset + header.image_size;
+  header.num_colours = 0;
+  header.important_colours = 0;
+  fwrite (&header, sizeof (struct bmp_header), 1, bmp_file);
+  const uint8_t padding[3] = { 0, 0, 0 };
+  for (int i = 0; i < header.height; i++)
     {
-      fwrite (image->pixels[i], sizeof (struct pixel), image->header.width,
-              bmp_file);
+      fwrite (image->pixels[i], 1, row_bytes, bmp_file);
+      fwrite (padding, 1, row_size - row_bytes, bmp_file);
     }
   fclose (bmp_file);
 }
@@ -112,7 +172,7 @@ convert_to_bw (struct bmp_image *image)
 }
 
 void
-convert_to_binary (struct bmp_image *image, const int8_t threshold)
+convert_to_binary (struct bmp_image *image, const uint8_t threshold)
 {
   for (int i = 0; i < image->header.height; i++)
     {

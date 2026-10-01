@@ -9,15 +9,15 @@
 #define PADDING_OFFSET 1
 
 // https://stackoverflow.com/questions/65840161/write-bmp-image
-/*this program will only be able to read 24bit bitmaps (for now-maybe for ever)
-so each colour channel gets 8 bits each. each bitmap has to be aligned to
-4bytes(32bits) so added 8bits to each pixel to guarentee the image alignes to
-32 bits no matter the size*/
+/*this program will only be able to read uncompressed 24bit bitmaps (for
+now-maybe for ever) so each colour channel gets 8 bits each. bmp stores the
+channels in blue, green, red order. each row in the file is padded to a
+multiple of 4 bytes; that padding is stripped on read and re-added on write*/
 struct pixel
 {
-  uint8_t red;
-  uint8_t green;
   uint8_t blue;
+  uint8_t green;
+  uint8_t red;
 };
 #pragma pack(push, 1)
 /*each bitmap file is 54 byte and the data is in that particular order with
@@ -69,15 +69,10 @@ struct bmp_image
   struct bmp_header header;
   struct pixel **pixels;
 };
-static struct bmp_header _read_header (FILE *bmp_file, char *file_path);
-static struct pixel **_read_pixels (FILE *bmp_file, char *file_path,
-                                    struct bmp_header *header);
 struct bmp_image *read_img (char *file_path);
 void write_img (struct bmp_image *img, char *file_name);
 void convert_to_bw (struct bmp_image *image);
-void convert_to_binary (struct bmp_image *image, const int8_t threshold);
-static void _add_padding (struct bmp_image *);
-static void convolution (struct bmp_image *image, int **kernel);
+void convert_to_binary (struct bmp_image *image, const uint8_t threshold);
 // static void _normalize_img(struct bmp_image* image);
 void blur (struct bmp_image *image);
 void g_blur (struct bmp_image *image, double sigma);
