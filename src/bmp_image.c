@@ -151,6 +151,55 @@ write_img (struct bmp_image *image, char *file_name)
   fclose (bmp_file);
 }
 
+struct bmp_image *
+copy_img (const struct bmp_image *image)
+{
+  struct bmp_image *copy
+      = (struct bmp_image *)malloc (sizeof (struct bmp_image));
+  struct pixel **pixels = (struct pixel **)malloc (image->header.height
+                                                   * sizeof (struct pixel *));
+  if (copy == NULL || pixels == NULL)
+    {
+      fprintf (stderr,
+               "error [bmp_image:copy_img]->memory allocation failed for %s\n",
+               image->file_path);
+      exit (1);
+    }
+  size_t row_bytes = image->header.width * sizeof (struct pixel);
+  for (int i = 0; i < image->header.height; i++)
+    {
+      pixels[i] = (struct pixel *)malloc (row_bytes);
+      if (pixels[i] == NULL)
+        {
+          fprintf (stderr,
+                   "error [bmp_image:copy_img]->memory allocation failed for "
+                   "%s\n",
+                   image->file_path);
+          exit (1);
+        }
+      memcpy (pixels[i], image->pixels[i], row_bytes);
+    }
+  copy->file_path = image->file_path;
+  copy->header = image->header;
+  copy->pixels = pixels;
+  return copy;
+}
+
+void
+free_img (struct bmp_image *image)
+{
+  if (image == NULL)
+    {
+      return;
+    }
+  for (int i = 0; i < image->header.height; i++)
+    {
+      free (image->pixels[i]);
+    }
+  free (image->pixels);
+  free (image);
+}
+
 void
 convert_to_bw (struct bmp_image *image)
 {
@@ -356,7 +405,135 @@ h_edge (struct bmp_image *image)
   convolution (image, kernel);
 }
 
+// sobel edge magnitude: sqrt(gx^2 + gy^2) of the vertical and horizontal
+// edge responses
+void
+edge (struct bmp_image *image)
+{
+  struct bmp_image *gy = copy_img (image);
+  v_edge (image);
+  h_edge (gy);
+  for (int i = 0; i < image->header.height; i++)
+    {
+      for (int j = 0; j < image->header.width; j++)
+        {
+          int gx_val = image->pixels[i][j].red;
+          int gy_val = gy->pixels[i][j].red;
+          int magnitude
+              = min ((int)lround (sqrt (gx_val * gx_val + gy_val * gy_val)),
+                     255);
+          image->pixels[i][j].red = magnitude;
+          image->pixels[i][j].green = magnitude;
+          image->pixels[i][j].blue = magnitude;
+        }
+    }
+  free_img (gy);
+}
+
+void
+sharpen (struct bmp_image *image)
+{
+  const double kernel[3][3] = { { 0, -1, 0 }, { -1, 5, -1 }, { 0, -1, 0 } };
+  convolution (image, kernel);
+}
+
+void
+invert (struct bmp_image *image)
+{
+  for (int i = 0; i < image->header.height; i++)
+    {
+      for (int j = 0; j < image->header.width; j++)
+        {
+          image->pixels[i][j].red = 255 - image->pixels[i][j].red;
+          image->pixels[i][j].green = 255 - image->pixels[i][j].green;
+          image->pixels[i][j].blue = 255 - image->pixels[i][j].blue;
+        }
+    }
+}
+
+static uint8_t
+_clamp_channel (int value)
+{
+  return (uint8_t)max (0, min (value, 255));
+}
+
+void
+adjust_brightness (struct bmp_image *image, int delta)
+{
+  for (int i = 0; i < image->header.height; i++)
+    {
+      for (int j = 0; j < image->header.width; j++)
+        {
+          image->pixels[i][j].red
+              = _clamp_channel (image->pixels[i][j].red + delta);
+          image->pixels[i][j].green
+              = _clamp_channel (image->pixels[i][j].green + delta);
+          image->pixels[i][j].blue
+              = _clamp_channel (image->pixels[i][j].blue + delta);
+        }
+    }
+}
+
+// mirror the image left to right
+void
+flip_horizontal (struct bmp_image *image)
+{
+  for (int i = 0; i < image->header.height; i++)
+    {
+      for (int j = 0; j < image->header.width / 2; j++)
+        {
+          struct pixel tmp = image->pixels[i][j];
+          image->pixels[i][j] = image->pixels[i][image->header.width - 1 - j];
+          image->pixels[i][image->header.width - 1 - j] = tmp;
+        }
+    }
+}
+
+// mirror the image top to bottom. only the row pointers need swapping
+void
+flip_vertical (struct bmp_image *image)
+{
+  for (int i = 0; i < image->header.height / 2; i++)
+    {
+      struct pixel *tmp = image->pixels[i];
+      image->pixels[i] = image->pixels[image->header.height - 1 - i];
+      image->pixels[image->header.height - 1 - i] = tmp;
+    }
+}
+
+// places image2 to the right of image1. image1 is modified in place, image2
+// is left untouched. both images must have the same height
 void
 concat (struct bmp_image *image1, struct bmp_image *image2)
 {
+  if (image1->header.height != image2->header.height)
+    {
+      fprintf (stderr,
+               "error [bmp_image:concat]->height mismatch between %s (%d) "
+               "and %s (%d)\n",
+               image1->file_path, image1->header.height, image2->file_path,
+               image2->header.height);
+      exit (1);
+    }
+  int new_width = image1->header.width + image2->header.width;
+  size_t row1_bytes = image1->header.width * sizeof (struct pixel);
+  size_t row2_bytes = image2->header.width * sizeof (struct pixel);
+  for (int i = 0; i < image1->header.height; i++)
+    {
+      struct pixel *row = (struct pixel *)malloc (new_width
+                                                  * sizeof (struct pixel));
+      if (row == NULL)
+        {
+          fprintf (stderr,
+                   "error [bmp_image:concat]->memory allocation failed for "
+                   "%s\n",
+                   image1->file_path);
+          exit (1);
+        }
+      memcpy (row, image1->pixels[i], row1_bytes);
+      memcpy (row + image1->header.width, image2->pixels[i], row2_bytes);
+      free (image1->pixels[i]);
+      image1->pixels[i] = row;
+    }
+  image1->header.width = new_width;
 }

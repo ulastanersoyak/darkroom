@@ -71,6 +71,8 @@ struct bmp_image
 };
 struct bmp_image *read_img (char *file_path);
 void write_img (struct bmp_image *img, char *file_name);
+struct bmp_image *copy_img (const struct bmp_image *image);
+void free_img (struct bmp_image *image);
 void convert_to_bw (struct bmp_image *image);
 void convert_to_binary (struct bmp_image *image, const uint8_t threshold);
 // static void _normalize_img(struct bmp_image* image);
@@ -78,5 +80,11 @@ void blur (struct bmp_image *image);
 void g_blur (struct bmp_image *image, double sigma);
 void v_edge (struct bmp_image *image);
 void h_edge (struct bmp_image *image);
+void edge (struct bmp_image *image);
+void sharpen (struct bmp_image *image);
+void invert (struct bmp_image *image);
+void adjust_brightness (struct bmp_image *image, int delta);
+void flip_horizontal (struct bmp_image *image);
+void flip_vertical (struct bmp_image *image);
 void concat (struct bmp_image *image1, struct bmp_image *image2);
 #endif
