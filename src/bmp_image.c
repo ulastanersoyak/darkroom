@@ -246,28 +246,30 @@ convert_to_binary (struct bmp_image *image, const uint8_t threshold)
     }
 }
 
+// surrounds the image with PADDING_OFFSET pixels on every side. border pixels
+// copy the nearest edge pixel so filters don't see a black frame around the
+// image
 static void
 _add_padding (struct bmp_image *image)
 {
-  int new_width = image->header.width + 2 * PADDING_OFFSET;
-  int new_height = image->header.height + 2 * PADDING_OFFSET;
+  int width = image->header.width;
+  int height = image->header.height;
+  int new_width = width + 2 * PADDING_OFFSET;
+  int new_height = height + 2 * PADDING_OFFSET;
   struct pixel **output_pixels
       = (struct pixel **)malloc (new_height * sizeof (struct pixel *));
   for (int i = 0; i < new_height; i++)
     {
       output_pixels[i]
-          = (struct pixel *)calloc (new_width, sizeof (struct pixel));
-    }
-  for (int i = PADDING_OFFSET; i < image->header.height + PADDING_OFFSET; i++)
-    {
-      for (int j = PADDING_OFFSET; j < image->header.width + PADDING_OFFSET;
-           j++)
+          = (struct pixel *)malloc (new_width * sizeof (struct pixel));
+      int src_i = min (max (i - PADDING_OFFSET, 0), height - 1);
+      for (int j = 0; j < new_width; j++)
         {
-          output_pixels[i][j]
-              = image->pixels[i - PADDING_OFFSET][j - PADDING_OFFSET];
+          int src_j = min (max (j - PADDING_OFFSET, 0), width - 1);
+          output_pixels[i][j] = image->pixels[src_i][src_j];
         }
     }
-  for (int i = 0; i < image->header.height; i++)
+  for (int i = 0; i < height; i++)
     {
       free (image->pixels[i]);
     }
