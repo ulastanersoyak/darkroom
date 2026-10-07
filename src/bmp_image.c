@@ -8,38 +8,72 @@ _row_size (int32_t width)
   return ((uint32_t)width * sizeof (struct pixel) + 3) & ~3u;
 }
 
-static struct bmp_header
-_read_header (FILE *bmp_file, char *file_path)
+// frees the first count rows of pixels and the row array itself
+static void
+_free_rows (struct pixel **pixels, int count)
 {
-  struct bmp_header header;
-  if (fread (&header, sizeof (struct bmp_header), 1, bmp_file) != 1)
+  if (pixels == NULL)
+    {
+      return;
+    }
+  for (int i = 0; i < count; i++)
+    {
+      free (pixels[i]);
+    }
+  free (pixels);
+}
+
+// allocates height rows of row_bytes each. returns NULL if any allocation
+// fails, nothing is leaked in that case
+static struct pixel **
+_alloc_rows (int height, size_t row_bytes)
+{
+  struct pixel **pixels
+      = (struct pixel **)malloc (height * sizeof (struct pixel *));
+  if (pixels == NULL)
+    {
+      return NULL;
+    }
+  for (int i = 0; i < height; i++)
+    {
+      pixels[i] = (struct pixel *)malloc (row_bytes);
+      if (pixels[i] == NULL)
+        {
+          _free_rows (pixels, i);
+          return NULL;
+        }
+    }
+  return pixels;
+}
+
+static int
+_read_header (FILE *bmp_file, char *file_path, struct bmp_header *header)
+{
+  if (fread (header, sizeof (struct bmp_header), 1, bmp_file) != 1)
     {
       fprintf (stderr,
                "error [bmp_image:_read_header]->couldn't read header from %s\n",
                file_path);
-      fclose (bmp_file);
-      exit (1);
+      return -1;
     }
-  if (header.signature != 0x4D42)
+  if (header->signature != 0x4D42)
     {
       fprintf (stderr,
                "error [bmp_image:_read_header]->invalid signature from "
                "%s.expected 0x4D42 got 0x%04X\n",
-               file_path, header.signature);
-      fclose (bmp_file);
-      exit (1);
+               file_path, header->signature);
+      return -1;
     }
-  if (header.bit_depth != 24 || header.compression != 0 || header.width <= 0
-      || header.height == 0)
+  if (header->bit_depth != 24 || header->compression != 0
+      || header->width <= 0 || header->height == 0)
     {
       fprintf (stderr,
                "error [bmp_image:_read_header]->unsupported bitmap %s.only "
                "uncompressed 24bit bitmaps are supported\n",
                file_path);
-      fclose (bmp_file);
-      exit (1);
+      return -1;
     }
-  return header;
+  return 0;
 }
 
 static struct pixel **
@@ -53,28 +87,15 @@ _read_pixels (FILE *bmp_file, char *file_path, struct bmp_header *header)
       header->height = -header->height;
     }
   uint32_t row_size = _row_size (header->width);
-  struct pixel **pixels
-      = (struct pixel **)malloc (header->height * sizeof (struct pixel *));
+  // allocate the padded row size so the whole row can be read at once
+  struct pixel **pixels = _alloc_rows (header->height, row_size);
   if (pixels == NULL)
     {
       fprintf (stderr,
                "error [bmp_image:_read_pixels]->memory allocation failed for "
                "%s\n",
                file_path);
-      exit (1);
-    }
-  for (int i = 0; i < header->height; i++)
-    {
-      // allocate the padded row size so the whole row can be read at once
-      pixels[i] = (struct pixel *)malloc (row_size);
-      if (pixels[i] == NULL)
-        {
-          fprintf (stderr,
-                   "error [bmp_image:_read_pixels]->memory allocation failed "
-                   "for %s\n",
-                   file_path);
-          exit (1);
-        }
+      return NULL;
     }
   fseek (bmp_file, header->data_offset, SEEK_SET);
   for (int i = 0; i < header->height; i++)
@@ -86,7 +107,8 @@ _read_pixels (FILE *bmp_file, char *file_path, struct bmp_header *header)
                    "error [bmp_image:_read_pixels]->unexpected end of file in "
                    "%s\n",
                    file_path);
-          exit (1);
+          _free_rows (pixels, header->height);
+          return NULL;
         }
     }
   return pixels;
@@ -100,10 +122,20 @@ read_img (char *file_path)
     {
       fprintf (stderr, "error [bmp_image:read_img]->couldn't open file %s\n",
                file_path);
-      exit (1);
+      return NULL;
     }
-  struct bmp_header header = _read_header (bmp_file, file_path);
+  struct bmp_header header;
+  if (_read_header (bmp_file, file_path, &header) != 0)
+    {
+      fclose (bmp_file);
+      return NULL;
+    }
   struct pixel **pixels = _read_pixels (bmp_file, file_path, &header);
+  fclose (bmp_file);
+  if (pixels == NULL)
+    {
+      return NULL;
+    }
   struct bmp_image *image
       = (struct bmp_image *)malloc (sizeof (struct bmp_image));
   if (image == NULL)
@@ -111,16 +143,16 @@ read_img (char *file_path)
       fprintf (stderr,
                "error [bmp_image:read_img]->memory allocation failed for %s\n",
                file_path);
-      exit (1);
+      _free_rows (pixels, header.height);
+      return NULL;
     }
   image->file_path = file_path;
   image->header = header;
   image->pixels = pixels;
-  fclose (bmp_file);
   return image;
 }
 
-void
+int
 write_img (struct bmp_image *image, char *file_name)
 {
   FILE *bmp_file = fopen (file_name, "wb");
@@ -128,7 +160,7 @@ write_img (struct bmp_image *image, char *file_name)
     {
       fprintf (stderr, "error [bmp_image:write_img]->couldn't open file %s\n",
                file_name);
-      exit (1);
+      return -1;
     }
   // only the 40 byte info header and the pixels are written, so the offsets
   // and sizes from the source file have to be recomputed
@@ -141,14 +173,25 @@ write_img (struct bmp_image *image, char *file_name)
   header.file_size = header.data_offset + header.image_size;
   header.num_colours = 0;
   header.important_colours = 0;
-  fwrite (&header, sizeof (struct bmp_header), 1, bmp_file);
+  int ok = fwrite (&header, sizeof (struct bmp_header), 1, bmp_file) == 1;
   const uint8_t padding[3] = { 0, 0, 0 };
-  for (int i = 0; i < header.height; i++)
+  for (int i = 0; ok && i < header.height; i++)
     {
-      fwrite (image->pixels[i], 1, row_bytes, bmp_file);
-      fwrite (padding, 1, row_size - row_bytes, bmp_file);
+      ok = fwrite (image->pixels[i], 1, row_bytes, bmp_file) == row_bytes
+           && fwrite (padding, 1, row_size - row_bytes, bmp_file)
+                  == row_size - row_bytes;
     }
-  fclose (bmp_file);
+  if (fclose (bmp_file) != 0)
+    {
+      ok = 0;
+    }
+  if (!ok)
+    {
+      fprintf (stderr, "error [bmp_image:write_img]->couldn't write file %s\n",
+               file_name);
+      return -1;
+    }
+  return 0;
 }
 
 struct bmp_image *
@@ -156,27 +199,19 @@ copy_img (const struct bmp_image *image)
 {
   struct bmp_image *copy
       = (struct bmp_image *)malloc (sizeof (struct bmp_image));
-  struct pixel **pixels = (struct pixel **)malloc (image->header.height
-                                                   * sizeof (struct pixel *));
+  size_t row_bytes = image->header.width * sizeof (struct pixel);
+  struct pixel **pixels = _alloc_rows (image->header.height, row_bytes);
   if (copy == NULL || pixels == NULL)
     {
       fprintf (stderr,
                "error [bmp_image:copy_img]->memory allocation failed for %s\n",
                image->file_path);
-      exit (1);
+      free (copy);
+      _free_rows (pixels, image->header.height);
+      return NULL;
     }
-  size_t row_bytes = image->header.width * sizeof (struct pixel);
   for (int i = 0; i < image->header.height; i++)
     {
-      pixels[i] = (struct pixel *)malloc (row_bytes);
-      if (pixels[i] == NULL)
-        {
-          fprintf (stderr,
-                   "error [bmp_image:copy_img]->memory allocation failed for "
-                   "%s\n",
-                   image->file_path);
-          exit (1);
-        }
       memcpy (pixels[i], image->pixels[i], row_bytes);
     }
   copy->file_path = image->file_path;
@@ -192,11 +227,7 @@ free_img (struct bmp_image *image)
     {
       return;
     }
-  for (int i = 0; i < image->header.height; i++)
-    {
-      free (image->pixels[i]);
-    }
-  free (image->pixels);
+  _free_rows (image->pixels, image->header.height);
   free (image);
 }
 
@@ -246,47 +277,51 @@ convert_to_binary (struct bmp_image *image, const uint8_t threshold)
     }
 }
 
-// surrounds the image with PADDING_OFFSET pixels on every side. border pixels
-// copy the nearest edge pixel so filters don't see a black frame around the
-// image
-static void
-_add_padding (struct bmp_image *image)
+// returns a copy of the image's pixels surrounded by PADDING_OFFSET pixels on
+// every side, or NULL if allocation fails. border pixels copy the nearest
+// edge pixel so filters don't see a black frame around the image
+static struct pixel **
+_add_padding (const struct bmp_image *image)
 {
   int width = image->header.width;
   int height = image->header.height;
   int new_width = width + 2 * PADDING_OFFSET;
   int new_height = height + 2 * PADDING_OFFSET;
-  struct pixel **output_pixels
-      = (struct pixel **)malloc (new_height * sizeof (struct pixel *));
+  struct pixel **padded
+      = _alloc_rows (new_height, new_width * sizeof (struct pixel));
+  if (padded == NULL)
+    {
+      return NULL;
+    }
   for (int i = 0; i < new_height; i++)
     {
-      output_pixels[i]
-          = (struct pixel *)malloc (new_width * sizeof (struct pixel));
       int src_i = min (max (i - PADDING_OFFSET, 0), height - 1);
       for (int j = 0; j < new_width; j++)
         {
           int src_j = min (max (j - PADDING_OFFSET, 0), width - 1);
-          output_pixels[i][j] = image->pixels[src_i][src_j];
+          padded[i][j] = image->pixels[src_i][src_j];
         }
     }
-  for (int i = 0; i < height; i++)
-    {
-      free (image->pixels[i]);
-    }
-  free (image->pixels);
-  image->pixels = output_pixels;
+  return padded;
 }
-static void
+
+// the image is left unchanged if this fails
+static int
 convolution (struct bmp_image *image, const double kernel[3][3])
 {
-  struct pixel **output_pixels = (struct pixel **)malloc (
-      image->header.height * sizeof (struct pixel *));
-  for (int i = 0; i < image->header.height; i++)
+  struct pixel **output_pixels = _alloc_rows (
+      image->header.height, image->header.width * sizeof (struct pixel));
+  struct pixel **padded = _add_padding (image);
+  if (output_pixels == NULL || padded == NULL)
     {
-      output_pixels[i] = (struct pixel *)malloc (image->header.width
-                                                 * sizeof (struct pixel));
+      fprintf (stderr,
+               "error [bmp_image:convolution]->memory allocation failed for "
+               "%s\n",
+               image->file_path);
+      _free_rows (output_pixels, image->header.height);
+      _free_rows (padded, image->header.height + 2 * PADDING_OFFSET);
+      return -1;
     }
-  _add_padding (image);
   double r_sum = 0;
   double g_sum = 0;
   double b_sum = 0;
@@ -304,12 +339,11 @@ convolution (struct bmp_image *image, const double kernel[3][3])
                 {
                   int x_idx = i + ki;
                   int y_idx = j + kj;
-                  r_sum += kernel[ki + 1][kj + 1]
-                           * (image->pixels[x_idx][y_idx].red);
-                  b_sum += kernel[ki + 1][kj + 1]
-                           * (image->pixels[x_idx][y_idx].blue);
-                  g_sum += kernel[ki + 1][kj + 1]
-                           * (image->pixels[x_idx][y_idx].green);
+                  r_sum += kernel[ki + 1][kj + 1] * (padded[x_idx][y_idx].red);
+                  b_sum
+                      += kernel[ki + 1][kj + 1] * (padded[x_idx][y_idx].blue);
+                  g_sum
+                      += kernel[ki + 1][kj + 1] * (padded[x_idx][y_idx].green);
                 }
             }
           // edge kernels produce negative responses, take the magnitude and
@@ -322,13 +356,10 @@ convolution (struct bmp_image *image, const double kernel[3][3])
               = min ((int)lround (fabs (b_sum)), 255);
         }
     }
-  // the padded image has 2*PADDING_OFFSET more rows than the header says
-  for (int i = 0; i < image->header.height + 2 * PADDING_OFFSET; i++)
-    {
-      free (image->pixels[i]);
-    }
-  free (image->pixels);
+  _free_rows (padded, image->header.height + 2 * PADDING_OFFSET);
+  _free_rows (image->pixels, image->header.height);
   image->pixels = output_pixels;
+  return 0;
 }
 // static void _normalize_img(struct bmp_image* image){
 //     int r_max_value=0;
@@ -357,16 +388,16 @@ convolution (struct bmp_image *image, const double kernel[3][3])
 // }
 
 // default 3x3 blur filter
-void
+int
 blur (struct bmp_image *image)
 {
   const double kernel[3][3] = { { 1.0 / 9, 1.0 / 9, 1.0 / 9 },
                                 { 1.0 / 9, 1.0 / 9, 1.0 / 9 },
                                 { 1.0 / 9, 1.0 / 9, 1.0 / 9 } };
-  convolution (image, kernel);
+  return convolution (image, kernel);
 }
 
-void
+int
 g_blur (struct bmp_image *image, double sigma)
 {
   double kernel[3][3];
@@ -388,33 +419,40 @@ g_blur (struct bmp_image *image, double sigma)
           kernel[i][j] /= sum;
         }
     }
-  convolution (image, (const double(*)[3])kernel);
+  return convolution (image, (const double(*)[3])kernel);
 }
 
-void
+int
 v_edge (struct bmp_image *image)
 {
   convert_to_bw (image);
   const double kernel[3][3] = { { -1, 0, 1 }, { -2, 0, 2 }, { -1, 0, 1 } };
-  convolution (image, kernel);
+  return convolution (image, kernel);
 }
 
-void
+int
 h_edge (struct bmp_image *image)
 {
   convert_to_bw (image);
   const double kernel[3][3] = { { -1, -2, -1 }, { 0, 0, 0 }, { 1, 2, 1 } };
-  convolution (image, kernel);
+  return convolution (image, kernel);
 }
 
 // sobel edge magnitude: sqrt(gx^2 + gy^2) of the vertical and horizontal
 // edge responses
-void
+int
 edge (struct bmp_image *image)
 {
   struct bmp_image *gy = copy_img (image);
-  v_edge (image);
-  h_edge (gy);
+  if (gy == NULL)
+    {
+      return -1;
+    }
+  if (v_edge (image) != 0 || h_edge (gy) != 0)
+    {
+      free_img (gy);
+      return -1;
+    }
   for (int i = 0; i < image->header.height; i++)
     {
       for (int j = 0; j < image->header.width; j++)
@@ -430,13 +468,14 @@ edge (struct bmp_image *image)
         }
     }
   free_img (gy);
+  return 0;
 }
 
-void
+int
 sharpen (struct bmp_image *image)
 {
   const double kernel[3][3] = { { 0, -1, 0 }, { -1, 5, -1 }, { 0, -1, 0 } };
-  convolution (image, kernel);
+  return convolution (image, kernel);
 }
 
 void
@@ -504,8 +543,9 @@ flip_vertical (struct bmp_image *image)
 }
 
 // places image2 to the right of image1. image1 is modified in place, image2
-// is left untouched. both images must have the same height
-void
+// is left untouched. both images must have the same height. on failure
+// image1 is left unchanged
+int
 concat (struct bmp_image *image1, struct bmp_image *image2)
 {
   if (image1->header.height != image2->header.height)
@@ -515,27 +555,27 @@ concat (struct bmp_image *image1, struct bmp_image *image2)
                "and %s (%d)\n",
                image1->file_path, image1->header.height, image2->file_path,
                image2->header.height);
-      exit (1);
+      return -1;
     }
   int new_width = image1->header.width + image2->header.width;
   size_t row1_bytes = image1->header.width * sizeof (struct pixel);
   size_t row2_bytes = image2->header.width * sizeof (struct pixel);
+  struct pixel **rows
+      = _alloc_rows (image1->header.height, new_width * sizeof (struct pixel));
+  if (rows == NULL)
+    {
+      fprintf (stderr,
+               "error [bmp_image:concat]->memory allocation failed for %s\n",
+               image1->file_path);
+      return -1;
+    }
   for (int i = 0; i < image1->header.height; i++)
     {
-      struct pixel *row = (struct pixel *)malloc (new_width
-                                                  * sizeof (struct pixel));
-      if (row == NULL)
-        {
-          fprintf (stderr,
-                   "error [bmp_image:concat]->memory allocation failed for "
-                   "%s\n",
-                   image1->file_path);
-          exit (1);
-        }
-      memcpy (row, image1->pixels[i], row1_bytes);
-      memcpy (row + image1->header.width, image2->pixels[i], row2_bytes);
-      free (image1->pixels[i]);
-      image1->pixels[i] = row;
+      memcpy (rows[i], image1->pixels[i], row1_bytes);
+      memcpy (rows[i] + image1->header.width, image2->pixels[i], row2_bytes);
     }
+  _free_rows (image1->pixels, image1->header.height);
+  image1->pixels = rows;
   image1->header.width = new_width;
+  return 0;
 }
