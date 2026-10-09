@@ -277,16 +277,16 @@ convert_to_binary (struct bmp_image *image, const uint8_t threshold)
     }
 }
 
-// returns a copy of the image's pixels surrounded by PADDING_OFFSET pixels on
-// every side, or NULL if allocation fails. border pixels copy the nearest
-// edge pixel so filters don't see a black frame around the image
+// returns a copy of the image's pixels surrounded by radius pixels on every
+// side, or NULL if allocation fails. border pixels copy the nearest edge
+// pixel so filters don't see a black frame around the image
 static struct pixel **
-_add_padding (const struct bmp_image *image)
+_add_padding (const struct bmp_image *image, int radius)
 {
   int width = image->header.width;
   int height = image->header.height;
-  int new_width = width + 2 * PADDING_OFFSET;
-  int new_height = height + 2 * PADDING_OFFSET;
+  int new_width = width + 2 * radius;
+  int new_height = height + 2 * radius;
   struct pixel **padded
       = _alloc_rows (new_height, new_width * sizeof (struct pixel));
   if (padded == NULL)
@@ -295,68 +295,68 @@ _add_padding (const struct bmp_image *image)
     }
   for (int i = 0; i < new_height; i++)
     {
-      int src_i = min (max (i - PADDING_OFFSET, 0), height - 1);
+      int src_i = min (max (i - radius, 0), height - 1);
       for (int j = 0; j < new_width; j++)
         {
-          int src_j = min (max (j - PADDING_OFFSET, 0), width - 1);
+          int src_j = min (max (j - radius, 0), width - 1);
           padded[i][j] = image->pixels[src_i][src_j];
         }
     }
   return padded;
 }
 
-// the image is left unchanged if this fails
-static int
-convolution (struct bmp_image *image, const double kernel[3][3])
+int
+convolve (struct bmp_image *image, const double *kernel, int size)
 {
+  if (size < 1 || size % 2 == 0)
+    {
+      fprintf (stderr,
+               "error [bmp_image:convolve]->kernel size must be odd and "
+               "positive, got %d\n",
+               size);
+      return -1;
+    }
+  int radius = size / 2;
   struct pixel **output_pixels = _alloc_rows (
       image->header.height, image->header.width * sizeof (struct pixel));
-  struct pixel **padded = _add_padding (image);
+  struct pixel **padded = _add_padding (image, radius);
   if (output_pixels == NULL || padded == NULL)
     {
       fprintf (stderr,
-               "error [bmp_image:convolution]->memory allocation failed for "
-               "%s\n",
+               "error [bmp_image:convolve]->memory allocation failed for %s\n",
                image->file_path);
       _free_rows (output_pixels, image->header.height);
-      _free_rows (padded, image->header.height + 2 * PADDING_OFFSET);
+      _free_rows (padded, image->header.height + 2 * radius);
       return -1;
     }
-  double r_sum = 0;
-  double g_sum = 0;
-  double b_sum = 0;
-  for (int i = PADDING_OFFSET; i < image->header.height + PADDING_OFFSET; i++)
+  for (int i = 0; i < image->header.height; i++)
     {
-      for (int j = PADDING_OFFSET; j < image->header.width + PADDING_OFFSET;
-           j++)
+      for (int j = 0; j < image->header.width; j++)
         {
-          r_sum = 0;
-          g_sum = 0;
-          b_sum = 0;
-          for (int ki = -1; ki < 2; ki++)
+          double r_sum = 0;
+          double g_sum = 0;
+          double b_sum = 0;
+          // (i, j) in the image is (i + radius, j + radius) in padded, so
+          // the window around it starts at (i, j)
+          for (int ki = 0; ki < size; ki++)
             {
-              for (int kj = -1; kj < 2; kj++)
+              for (int kj = 0; kj < size; kj++)
                 {
-                  int x_idx = i + ki;
-                  int y_idx = j + kj;
-                  r_sum += kernel[ki + 1][kj + 1] * (padded[x_idx][y_idx].red);
-                  b_sum
-                      += kernel[ki + 1][kj + 1] * (padded[x_idx][y_idx].blue);
-                  g_sum
-                      += kernel[ki + 1][kj + 1] * (padded[x_idx][y_idx].green);
+                  double weight = kernel[ki * size + kj];
+                  struct pixel p = padded[i + ki][j + kj];
+                  r_sum += weight * p.red;
+                  g_sum += weight * p.green;
+                  b_sum += weight * p.blue;
                 }
             }
           // edge kernels produce negative responses, take the magnitude and
           // clamp so the result fits in a byte instead of wrapping around
-          output_pixels[i - PADDING_OFFSET][j - PADDING_OFFSET].red
-              = min ((int)lround (fabs (r_sum)), 255);
-          output_pixels[i - PADDING_OFFSET][j - PADDING_OFFSET].green
-              = min ((int)lround (fabs (g_sum)), 255);
-          output_pixels[i - PADDING_OFFSET][j - PADDING_OFFSET].blue
-              = min ((int)lround (fabs (b_sum)), 255);
+          output_pixels[i][j].red = min ((int)lround (fabs (r_sum)), 255);
+          output_pixels[i][j].green = min ((int)lround (fabs (g_sum)), 255);
+          output_pixels[i][j].blue = min ((int)lround (fabs (b_sum)), 255);
         }
     }
-  _free_rows (padded, image->header.height + 2 * PADDING_OFFSET);
+  _free_rows (padded, image->header.height + 2 * radius);
   _free_rows (image->pixels, image->header.height);
   image->pixels = output_pixels;
   return 0;
@@ -394,32 +394,49 @@ blur (struct bmp_image *image)
   const double kernel[3][3] = { { 1.0 / 9, 1.0 / 9, 1.0 / 9 },
                                 { 1.0 / 9, 1.0 / 9, 1.0 / 9 },
                                 { 1.0 / 9, 1.0 / 9, 1.0 / 9 } };
-  return convolution (image, kernel);
+  return convolve (image, &kernel[0][0], 3);
 }
 
+// the kernel covers 3 sigma on each side, which holds over 99% of the
+// gaussian's weight
 int
 g_blur (struct bmp_image *image, double sigma)
 {
-  double kernel[3][3];
+  if (sigma <= 0)
+    {
+      fprintf (stderr,
+               "error [bmp_image:g_blur]->sigma must be positive, got %f\n",
+               sigma);
+      return -1;
+    }
+  int radius = max ((int)ceil (3 * sigma), 1);
+  int size = 2 * radius + 1;
+  double *kernel = (double *)malloc (size * size * sizeof (double));
+  if (kernel == NULL)
+    {
+      fprintf (stderr,
+               "error [bmp_image:g_blur]->memory allocation failed for %s\n",
+               image->file_path);
+      return -1;
+    }
   double sum = 0;
-  for (int i = 0; i < 3; i++)
+  for (int i = 0; i < size; i++)
     {
-      for (int j = 0; j < 3; j++)
+      for (int j = 0; j < size; j++)
         {
-          int x = i - 1;
-          int y = j - 1;
-          kernel[i][j] = exp (-(x * x + y * y) / (2 * sigma * sigma));
-          sum += kernel[i][j];
+          int x = i - radius;
+          int y = j - radius;
+          kernel[i * size + j] = exp (-(x * x + y * y) / (2 * sigma * sigma));
+          sum += kernel[i * size + j];
         }
     }
-  for (int i = 0; i < 3; i++)
+  for (int i = 0; i < size * size; i++)
     {
-      for (int j = 0; j < 3; j++)
-        {
-          kernel[i][j] /= sum;
-        }
+      kernel[i] /= sum;
     }
-  return convolution (image, (const double(*)[3])kernel);
+  int result = convolve (image, kernel, size);
+  free (kernel);
+  return result;
 }
 
 int
@@ -427,7 +444,7 @@ v_edge (struct bmp_image *image)
 {
   convert_to_bw (image);
   const double kernel[3][3] = { { -1, 0, 1 }, { -2, 0, 2 }, { -1, 0, 1 } };
-  return convolution (image, kernel);
+  return convolve (image, &kernel[0][0], 3);
 }
 
 int
@@ -435,7 +452,7 @@ h_edge (struct bmp_image *image)
 {
   convert_to_bw (image);
   const double kernel[3][3] = { { -1, -2, -1 }, { 0, 0, 0 }, { 1, 2, 1 } };
-  return convolution (image, kernel);
+  return convolve (image, &kernel[0][0], 3);
 }
 
 // sobel edge magnitude: sqrt(gx^2 + gy^2) of the vertical and horizontal
@@ -475,7 +492,7 @@ int
 sharpen (struct bmp_image *image)
 {
   const double kernel[3][3] = { { 0, -1, 0 }, { -1, 5, -1 }, { 0, -1, 0 } };
-  return convolution (image, kernel);
+  return convolve (image, &kernel[0][0], 3);
 }
 
 void

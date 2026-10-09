@@ -6,8 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PADDING_OFFSET 1
-
 // https://stackoverflow.com/questions/65840161/write-bmp-image
 /*this program will only be able to read uncompressed 24bit bitmaps (for
 now-maybe for ever) so each colour channel gets 8 bits each. bmp stores the
@@ -80,6 +78,10 @@ void free_img (struct bmp_image *image);
 void convert_to_bw (struct bmp_image *image);
 void convert_to_binary (struct bmp_image *image, const uint8_t threshold);
 // static void _normalize_img(struct bmp_image* image);
+/*applies a size x size kernel (row-major, size must be odd) to every pixel.
+pixels outside the image take the value of the nearest edge pixel. results
+are stored as their absolute value clamped to 0-255*/
+int convolve (struct bmp_image *image, const double *kernel, int size);
 int blur (struct bmp_image *image);
 int g_blur (struct bmp_image *image, double sigma);
 int v_edge (struct bmp_image *image);
