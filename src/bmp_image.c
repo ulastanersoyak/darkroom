@@ -634,3 +634,68 @@ concat (struct bmp_image *image1, struct bmp_image *image2)
   image1->header.width = new_width;
   return 0;
 }
+
+// scales the image to new_width x new_height with bilinear interpolation:
+// every output pixel blends the 4 source pixels closest to where it lands
+int
+resize (struct bmp_image *image, int new_width, int new_height)
+{
+  if (new_width < 1 || new_height < 1)
+    {
+      fprintf (stderr,
+               "error [bmp_image:resize]->invalid size %dx%d for %s\n",
+               new_width, new_height, image->file_path);
+      return -1;
+    }
+  struct pixel **output_pixels
+      = _alloc_rows (new_height, new_width * sizeof (struct pixel));
+  if (output_pixels == NULL)
+    {
+      fprintf (stderr,
+               "error [bmp_image:resize]->memory allocation failed for %s\n",
+               image->file_path);
+      return -1;
+    }
+  int width = image->header.width;
+  int height = image->header.height;
+  double scale_x = (double)width / new_width;
+  double scale_y = (double)height / new_height;
+  for (int i = 0; i < new_height; i++)
+    {
+      // map pixel centres, so the corners of both images line up
+      double src_y = fmin (fmax ((i + 0.5) * scale_y - 0.5, 0), height - 1);
+      int y0 = (int)src_y;
+      int y1 = min (y0 + 1, height - 1);
+      double fy = src_y - y0;
+      for (int j = 0; j < new_width; j++)
+        {
+          double src_x
+              = fmin (fmax ((j + 0.5) * scale_x - 0.5, 0), width - 1);
+          int x0 = (int)src_x;
+          int x1 = min (x0 + 1, width - 1);
+          double fx = src_x - x0;
+          struct pixel p00 = image->pixels[y0][x0];
+          struct pixel p01 = image->pixels[y0][x1];
+          struct pixel p10 = image->pixels[y1][x0];
+          struct pixel p11 = image->pixels[y1][x1];
+          double w00 = (1 - fx) * (1 - fy);
+          double w01 = fx * (1 - fy);
+          double w10 = (1 - fx) * fy;
+          double w11 = fx * fy;
+          output_pixels[i][j].red
+              = lround (w00 * p00.red + w01 * p01.red + w10 * p10.red
+                        + w11 * p11.red);
+          output_pixels[i][j].green
+              = lround (w00 * p00.green + w01 * p01.green + w10 * p10.green
+                        + w11 * p11.green);
+          output_pixels[i][j].blue
+              = lround (w00 * p00.blue + w01 * p01.blue + w10 * p10.blue
+                        + w11 * p11.blue);
+        }
+    }
+  _free_rows (image->pixels, height);
+  image->pixels = output_pixels;
+  image->header.width = new_width;
+  image->header.height = new_height;
+  return 0;
+}

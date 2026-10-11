@@ -253,6 +253,43 @@ test_concat (void)
 }
 
 static void
+test_resize (void)
+{
+  struct pixel grey = { 50, 100, 150 };
+  struct bmp_image *image = read_img ("odd.bmp");
+
+  // same size is a no-op
+  struct bmp_image *copy = copy_img (image);
+  CHECK (resize (copy, 7, 5) == 0);
+  for (int i = 0; i < 5; i++)
+    for (int j = 0; j < 7; j++)
+      CHECK (_pixels_equal (copy->pixels[i][j], image->pixels[i][j]));
+  free_img (copy);
+
+  // upscaling keeps the corners and stays between neighbouring values
+  copy = copy_img (image);
+  CHECK (resize (copy, 21, 15) == 0);
+  CHECK (copy->header.width == 21 && copy->header.height == 15);
+  CHECK (_pixels_equal (copy->pixels[0][0], image->pixels[0][0]));
+  CHECK (_pixels_equal (copy->pixels[14][20], image->pixels[4][6]));
+  CHECK (copy->pixels[7][10].green >= 60 && copy->pixels[7][10].green <= 90);
+  // odd widths need row padding on write
+  CHECK (write_img (copy, "resized.bmp") == 0);
+  struct bmp_image *reread = read_img ("resized.bmp");
+  CHECK (reread != NULL && reread->header.width == 21);
+  free_img (reread);
+  free_img (copy);
+
+  copy = copy_img (image);
+  _fill (copy, grey);
+  CHECK (resize (copy, 3, 2) == 0 && _is_uniform (copy, grey));
+  CHECK (resize (copy, 0, 5) == -1 && resize (copy, 5, -1) == -1);
+  CHECK (copy->header.width == 3);
+  free_img (copy);
+  free_img (image);
+}
+
+static void
 test_box_blur (void)
 {
   struct pixel grey = { 50, 100, 150 };
@@ -310,6 +347,7 @@ main (void)
   test_edge_finds_boundary ();
   test_pixel_operations ();
   test_concat ();
+  test_resize ();
   test_box_blur ();
   test_emboss ();
 

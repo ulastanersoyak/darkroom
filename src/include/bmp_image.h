@@ -95,4 +95,5 @@ void adjust_brightness (struct bmp_image *image, int delta);
 void flip_horizontal (struct bmp_image *image);
 void flip_vertical (struct bmp_image *image);
 int concat (struct bmp_image *image1, struct bmp_image *image2);
+int resize (struct bmp_image *image, int new_width, int new_height);
 #endif
