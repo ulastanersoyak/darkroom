@@ -495,6 +495,35 @@ sharpen (struct bmp_image *image)
   return convolve (image, &kernel[0][0], 3);
 }
 
+// averages every pixel with its size x size neighbourhood. size must be odd
+int
+box_blur (struct bmp_image *image, int size)
+{
+  if (size < 1 || size % 2 == 0)
+    {
+      fprintf (stderr,
+               "error [bmp_image:box_blur]->size must be odd and positive, "
+               "got %d\n",
+               size);
+      return -1;
+    }
+  double *kernel = (double *)malloc (size * size * sizeof (double));
+  if (kernel == NULL)
+    {
+      fprintf (stderr,
+               "error [bmp_image:box_blur]->memory allocation failed for %s\n",
+               image->file_path);
+      return -1;
+    }
+  for (int i = 0; i < size * size; i++)
+    {
+      kernel[i] = 1.0 / (size * size);
+    }
+  int result = convolve (image, kernel, size);
+  free (kernel);
+  return result;
+}
+
 void
 invert (struct bmp_image *image)
 {

@@ -252,6 +252,33 @@ test_concat (void)
   free_img (image2);
 }
 
+static void
+test_box_blur (void)
+{
+  struct pixel grey = { 50, 100, 150 };
+  struct bmp_image *image = read_img ("odd.bmp");
+  struct bmp_image *copy = copy_img (image);
+  CHECK (box_blur (copy, 5) == 0);
+  // the 5x5 average around column 1 mixes the 200 and 10 red halves
+  CHECK (copy->pixels[2][1].red < 200 && copy->pixels[2][1].red > 10);
+  free_img (copy);
+
+  // a 3x3 box blur is the default blur
+  copy = copy_img (image);
+  struct bmp_image *expected = copy_img (image);
+  CHECK (box_blur (copy, 3) == 0 && blur (expected) == 0);
+  for (int i = 0; i < 5; i++)
+    for (int j = 0; j < 7; j++)
+      CHECK (_pixels_equal (copy->pixels[i][j], expected->pixels[i][j]));
+  free_img (expected);
+
+  _fill (copy, grey);
+  CHECK (box_blur (copy, 7) == 0 && _is_uniform (copy, grey));
+  CHECK (box_blur (copy, 4) == -1 && box_blur (copy, 0) == -1);
+  free_img (copy);
+  free_img (image);
+}
+
 int
 main (void)
 {
@@ -267,6 +294,7 @@ main (void)
   test_edge_finds_boundary ();
   test_pixel_operations ();
   test_concat ();
+  test_box_blur ();
 
   if (failures == 0)
     printf ("all tests passed\n");

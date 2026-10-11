@@ -88,6 +88,7 @@ int v_edge (struct bmp_image *image);
 int h_edge (struct bmp_image *image);
 int edge (struct bmp_image *image);
 int sharpen (struct bmp_image *image);
+int box_blur (struct bmp_image *image, int size);
 void invert (struct bmp_image *image);
 void adjust_brightness (struct bmp_image *image, int delta);
 void flip_horizontal (struct bmp_image *image);
