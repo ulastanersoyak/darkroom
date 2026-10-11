@@ -533,6 +533,16 @@ emboss (struct bmp_image *image)
   return convolve (image, &kernel[0][0], 3);
 }
 
+// second derivative edge detector. unlike sobel it responds to edges in
+// every direction with a single kernel
+int
+laplacian (struct bmp_image *image)
+{
+  convert_to_bw (image);
+  const double kernel[3][3] = { { 0, 1, 0 }, { 1, -4, 1 }, { 0, 1, 0 } };
+  return convolve (image, &kernel[0][0], 3);
+}
+
 void
 invert (struct bmp_image *image)
 {

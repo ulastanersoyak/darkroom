@@ -332,6 +332,22 @@ test_emboss (void)
   free_img (image);
 }
 
+static void
+test_laplacian (void)
+{
+  struct pixel grey = { 50, 100, 150 };
+  struct pixel black = { 0, 0, 0 };
+  struct bmp_image *image = read_img ("odd.bmp");
+  struct bmp_image *copy = copy_img (image);
+  CHECK (laplacian (copy) == 0);
+  CHECK (copy->pixels[2][2].red > 20 && copy->pixels[2][3].red > 20);
+  CHECK (copy->pixels[2][2].red == copy->pixels[2][2].green);
+  _fill (copy, grey);
+  CHECK (laplacian (copy) == 0 && _is_uniform (copy, black));
+  free_img (copy);
+  free_img (image);
+}
+
 int
 main (void)
 {
@@ -350,6 +366,7 @@ main (void)
   test_resize ();
   test_box_blur ();
   test_emboss ();
+  test_laplacian ();
 
   if (failures == 0)
     printf ("all tests passed\n");
