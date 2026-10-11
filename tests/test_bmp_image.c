@@ -279,6 +279,22 @@ test_box_blur (void)
   free_img (image);
 }
 
+static void
+test_emboss (void)
+{
+  struct pixel grey = { 50, 100, 150 };
+  struct bmp_image *image = read_img ("odd.bmp");
+  struct bmp_image *copy = copy_img (image);
+  CHECK (emboss (copy) == 0);
+  // pixels next to the red boundary change, the ones far from it don't
+  CHECK (copy->pixels[2][3].red != image->pixels[2][3].red);
+  CHECK (copy->pixels[2][0].red == image->pixels[2][0].red);
+  _fill (copy, grey);
+  CHECK (emboss (copy) == 0 && _is_uniform (copy, grey));
+  free_img (copy);
+  free_img (image);
+}
+
 int
 main (void)
 {
@@ -295,6 +311,7 @@ main (void)
   test_pixel_operations ();
   test_concat ();
   test_box_blur ();
+  test_emboss ();
 
   if (failures == 0)
     printf ("all tests passed\n");

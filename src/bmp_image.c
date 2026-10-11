@@ -524,6 +524,15 @@ box_blur (struct bmp_image *image, int size)
   return result;
 }
 
+// lights the image from the bottom right so edges look raised. the kernel
+// sums to 1, so flat areas keep their colour
+int
+emboss (struct bmp_image *image)
+{
+  const double kernel[3][3] = { { -2, -1, 0 }, { -1, 1, 1 }, { 0, 1, 2 } };
+  return convolve (image, &kernel[0][0], 3);
+}
+
 void
 invert (struct bmp_image *image)
 {
