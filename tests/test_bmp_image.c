@@ -316,6 +316,52 @@ test_crop (void)
   free_img (image);
 }
 
+static int
+_images_equal (struct bmp_image *a, struct bmp_image *b)
+{
+  if (a->header.width != b->header.width
+      || a->header.height != b->header.height)
+    return 0;
+  for (int i = 0; i < a->header.height; i++)
+    for (int j = 0; j < a->header.width; j++)
+      if (!_pixels_equal (a->pixels[i][j], b->pixels[i][j]))
+        return 0;
+  return 1;
+}
+
+static void
+test_rotate (void)
+{
+  struct bmp_image *image = read_img ("odd.bmp");
+  struct bmp_image *copy = copy_img (image);
+
+  // clockwise: the bottom left corner becomes the top left corner and the
+  // top left corner becomes the top right corner
+  CHECK (rotate (copy, 90) == 0);
+  CHECK (copy->header.width == 5 && copy->header.height == 7);
+  CHECK (_pixels_equal (copy->pixels[6][0], image->pixels[0][0]));
+  CHECK (_pixels_equal (copy->pixels[6][4], image->pixels[4][0]));
+  CHECK (rotate (copy, 90) == 0 && rotate (copy, 90) == 0
+         && rotate (copy, 90) == 0);
+  CHECK (_images_equal (copy, image));
+
+  CHECK (rotate (copy, 90) == 0 && rotate (copy, -90) == 0);
+  CHECK (_images_equal (copy, image));
+  CHECK (rotate (copy, 270) == 0 && rotate (copy, 90) == 0);
+  CHECK (_images_equal (copy, image));
+
+  struct bmp_image *flipped = copy_img (image);
+  flip_horizontal (flipped);
+  flip_vertical (flipped);
+  CHECK (rotate (copy, 180) == 0 && _images_equal (copy, flipped));
+  CHECK (rotate (copy, 45) == -1 && _images_equal (copy, flipped));
+  CHECK (rotate (copy, 720) == 0 && _images_equal (copy, flipped));
+
+  free_img (flipped);
+  free_img (copy);
+  free_img (image);
+}
+
 static void
 test_box_blur (void)
 {
@@ -392,6 +438,7 @@ main (void)
   test_concat ();
   test_resize ();
   test_crop ();
+  test_rotate ();
   test_box_blur ();
   test_emboss ();
   test_laplacian ();

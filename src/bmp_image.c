@@ -749,3 +749,58 @@ crop (struct bmp_image *image, int x, int y, int width, int height)
   image->header.height = height;
   return 0;
 }
+
+// rotates clockwise by a multiple of 90 degrees. negative angles rotate
+// counterclockwise
+int
+rotate (struct bmp_image *image, int degrees)
+{
+  int angle = ((degrees % 360) + 360) % 360;
+  if (angle % 90 != 0)
+    {
+      fprintf (stderr,
+               "error [bmp_image:rotate]->only multiples of 90 degrees are "
+               "supported, got %d\n",
+               degrees);
+      return -1;
+    }
+  if (angle == 0)
+    {
+      return 0;
+    }
+  if (angle == 180)
+    {
+      flip_horizontal (image);
+      flip_vertical (image);
+      return 0;
+    }
+  int width = image->header.width;
+  int height = image->header.height;
+  // the new image is height wide and width tall
+  struct pixel **output_pixels
+      = _alloc_rows (width, height * sizeof (struct pixel));
+  if (output_pixels == NULL)
+    {
+      fprintf (stderr,
+               "error [bmp_image:rotate]->memory allocation failed for %s\n",
+               image->file_path);
+      return -1;
+    }
+  // rows are stored bottom-up: clockwise, output row i comes from input
+  // column width - 1 - i read bottom to top. counterclockwise, it comes from
+  // input column i read top to bottom
+  for (int i = 0; i < width; i++)
+    {
+      for (int j = 0; j < height; j++)
+        {
+          output_pixels[i][j] = angle == 90
+                                    ? image->pixels[j][width - 1 - i]
+                                    : image->pixels[height - 1 - j][i];
+        }
+    }
+  _free_rows (image->pixels, height);
+  image->pixels = output_pixels;
+  image->header.width = height;
+  image->header.height = width;
+  return 0;
+}
