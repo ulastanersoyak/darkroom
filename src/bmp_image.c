@@ -709,3 +709,43 @@ resize (struct bmp_image *image, int new_width, int new_height)
   image->header.height = new_height;
   return 0;
 }
+
+// keeps the width x height rectangle whose top left corner is x pixels from
+// the left and y pixels from the top. the rectangle must fit in the image
+int
+crop (struct bmp_image *image, int x, int y, int width, int height)
+{
+  if (x < 0 || y < 0 || width < 1 || height < 1
+      || x + width > image->header.width
+      || y + height > image->header.height)
+    {
+      fprintf (stderr,
+               "error [bmp_image:crop]->%dx%d at (%d, %d) doesn't fit in %s "
+               "(%dx%d)\n",
+               width, height, x, y, image->file_path, image->header.width,
+               image->header.height);
+      return -1;
+    }
+  struct pixel **output_pixels
+      = _alloc_rows (height, width * sizeof (struct pixel));
+  if (output_pixels == NULL)
+    {
+      fprintf (stderr,
+               "error [bmp_image:crop]->memory allocation failed for %s\n",
+               image->file_path);
+      return -1;
+    }
+  // rows are stored bottom-up, so the lowest kept row is height + y rows
+  // above the bottom of the image
+  int first_row = image->header.height - y - height;
+  for (int i = 0; i < height; i++)
+    {
+      memcpy (output_pixels[i], image->pixels[first_row + i] + x,
+              width * sizeof (struct pixel));
+    }
+  _free_rows (image->pixels, image->header.height);
+  image->pixels = output_pixels;
+  image->header.width = width;
+  image->header.height = height;
+  return 0;
+}

@@ -290,6 +290,33 @@ test_resize (void)
 }
 
 static void
+test_crop (void)
+{
+  struct bmp_image *image = read_img ("odd.bmp");
+  struct bmp_image *copy = copy_img (image);
+  // 3x2 rectangle starting at column 2, one row below the top. the top row
+  // is the last stored row
+  CHECK (crop (copy, 2, 1, 3, 2) == 0);
+  CHECK (copy->header.width == 3 && copy->header.height == 2);
+  CHECK (_pixels_equal (copy->pixels[1][0], image->pixels[3][2]));
+  CHECK (_pixels_equal (copy->pixels[0][2], image->pixels[2][4]));
+
+  CHECK (crop (copy, 0, 0, 4, 1) == -1);
+  CHECK (crop (copy, -1, 0, 1, 1) == -1);
+  CHECK (crop (copy, 0, 0, 0, 1) == -1);
+  CHECK (copy->header.width == 3);
+  free_img (copy);
+
+  copy = copy_img (image);
+  CHECK (crop (copy, 0, 0, 7, 5) == 0);
+  for (int i = 0; i < 5; i++)
+    for (int j = 0; j < 7; j++)
+      CHECK (_pixels_equal (copy->pixels[i][j], image->pixels[i][j]));
+  free_img (copy);
+  free_img (image);
+}
+
+static void
 test_box_blur (void)
 {
   struct pixel grey = { 50, 100, 150 };
@@ -364,6 +391,7 @@ main (void)
   test_pixel_operations ();
   test_concat ();
   test_resize ();
+  test_crop ();
   test_box_blur ();
   test_emboss ();
   test_laplacian ();
