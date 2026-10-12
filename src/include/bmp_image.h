@@ -93,6 +93,7 @@ int sharpen (struct bmp_image *image);
 int box_blur (struct bmp_image *image, int size);
 int emboss (struct bmp_image *image);
 int laplacian (struct bmp_image *image);
+int unsharp_mask (struct bmp_image *image, double sigma, double amount);
 void invert (struct bmp_image *image);
 void adjust_brightness (struct bmp_image *image, int delta);
 void flip_horizontal (struct bmp_image *image);

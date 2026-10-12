@@ -442,6 +442,33 @@ test_gradient_edges (void)
   free_img (image);
 }
 
+static void
+test_unsharp_mask (void)
+{
+  struct pixel grey = { 50, 100, 150 };
+  struct bmp_image *image = read_img ("odd.bmp");
+  struct bmp_image *copy = copy_img (image);
+  // the boundary gets more contrast: the bright side brighter, the dark side
+  // darker
+  CHECK (unsharp_mask (copy, 1.0, 1.5) == 0);
+  CHECK (copy->pixels[2][2].red > image->pixels[2][2].red);
+  CHECK (copy->pixels[2][3].red < image->pixels[2][3].red);
+  free_img (copy);
+
+  copy = copy_img (image);
+  CHECK (unsharp_mask (copy, 1.0, 0) == 0);
+  for (int i = 0; i < 5; i++)
+    for (int j = 0; j < 7; j++)
+      CHECK (_pixels_equal (copy->pixels[i][j], image->pixels[i][j]));
+
+  _fill (copy, grey);
+  CHECK (unsharp_mask (copy, 2.0, 3.0) == 0 && _is_uniform (copy, grey));
+  CHECK (unsharp_mask (copy, 0, 1.0) == -1);
+  CHECK (unsharp_mask (copy, 1.0, -1.0) == -1);
+  free_img (copy);
+  free_img (image);
+}
+
 int
 main (void)
 {
@@ -464,6 +491,7 @@ main (void)
   test_emboss ();
   test_laplacian ();
   test_gradient_edges ();
+  test_unsharp_mask ();
 
   if (failures == 0)
     printf ("all tests passed\n");

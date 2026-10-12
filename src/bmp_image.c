@@ -576,6 +576,52 @@ laplacian (struct bmp_image *image)
   return convolve (image, &kernel[0][0], 3);
 }
 
+static uint8_t
+_unsharp_channel (uint8_t original, uint8_t blurred, double amount)
+{
+  int value = (int)lround (original + amount * (original - blurred));
+  return (uint8_t)max (0, min (value, 255));
+}
+
+// sharpens by adding back the detail a gaussian blur removes:
+// original + amount * (original - blurred). sigma sets the size of the
+// details that get boosted, amount how strongly
+int
+unsharp_mask (struct bmp_image *image, double sigma, double amount)
+{
+  if (amount < 0)
+    {
+      fprintf (stderr,
+               "error [bmp_image:unsharp_mask]->amount must not be negative, "
+               "got %f\n",
+               amount);
+      return -1;
+    }
+  struct bmp_image *blurred = copy_img (image);
+  if (blurred == NULL)
+    {
+      return -1;
+    }
+  if (g_blur (blurred, sigma) != 0)
+    {
+      free_img (blurred);
+      return -1;
+    }
+  for (int i = 0; i < image->header.height; i++)
+    {
+      for (int j = 0; j < image->header.width; j++)
+        {
+          struct pixel *p = &image->pixels[i][j];
+          struct pixel b = blurred->pixels[i][j];
+          p->red = _unsharp_channel (p->red, b.red, amount);
+          p->green = _unsharp_channel (p->green, b.green, amount);
+          p->blue = _unsharp_channel (p->blue, b.blue, amount);
+        }
+    }
+  free_img (blurred);
+  return 0;
+}
+
 void
 invert (struct bmp_image *image)
 {
