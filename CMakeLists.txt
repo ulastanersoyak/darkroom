@@ -8,8 +8,6 @@ set(HEADERS
 )
 
 set(SOURCES
-    src/main.c
     src/bmp_image.c
     src/custom_math.c
 )
-add_executable(run ${SOURCES} ${HEADERS})
