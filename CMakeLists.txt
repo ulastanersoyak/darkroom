@@ -19,3 +19,6 @@ add_executable(test_bmp_image tests/test_bmp_image.c)
 target_link_libraries(test_bmp_image PRIVATE darkroom)
 add_test(NAME bmp_image COMMAND test_bmp_image
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(apply_filters examples/apply_filters.c)
+target_link_libraries(apply_filters PRIVATE darkroom)
