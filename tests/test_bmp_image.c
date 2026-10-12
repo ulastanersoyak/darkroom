@@ -421,6 +421,27 @@ test_laplacian (void)
   free_img (image);
 }
 
+static void
+test_gradient_edges (void)
+{
+  struct pixel grey = { 50, 100, 150 };
+  struct pixel black = { 0, 0, 0 };
+  int (*detectors[]) (struct bmp_image *)
+      = { edge, prewitt_edge, scharr_edge };
+  struct bmp_image *image = read_img ("odd.bmp");
+  for (int k = 0; k < 3; k++)
+    {
+      struct bmp_image *copy = copy_img (image);
+      CHECK (detectors[k] (copy) == 0);
+      CHECK (copy->pixels[2][2].red > 100 && copy->pixels[2][3].red > 100);
+      CHECK (copy->pixels[2][2].red == copy->pixels[2][2].blue);
+      _fill (copy, grey);
+      CHECK (detectors[k] (copy) == 0 && _is_uniform (copy, black));
+      free_img (copy);
+    }
+  free_img (image);
+}
+
 int
 main (void)
 {
@@ -442,6 +463,7 @@ main (void)
   test_box_blur ();
   test_emboss ();
   test_laplacian ();
+  test_gradient_edges ();
 
   if (failures == 0)
     printf ("all tests passed\n");

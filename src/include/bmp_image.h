@@ -87,6 +87,8 @@ int g_blur (struct bmp_image *image, double sigma);
 int v_edge (struct bmp_image *image);
 int h_edge (struct bmp_image *image);
 int edge (struct bmp_image *image);
+int prewitt_edge (struct bmp_image *image);
+int scharr_edge (struct bmp_image *image);
 int sharpen (struct bmp_image *image);
 int box_blur (struct bmp_image *image, int size);
 int emboss (struct bmp_image *image);

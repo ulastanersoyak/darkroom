@@ -455,17 +455,19 @@ h_edge (struct bmp_image *image)
   return convolve (image, &kernel[0][0], 3);
 }
 
-// sobel edge magnitude: sqrt(gx^2 + gy^2) of the vertical and horizontal
-// edge responses
-int
-edge (struct bmp_image *image)
+// edge magnitude sqrt(gx^2 + gy^2) where gx and gy are the image convolved
+// with the 3x3 kernels kernel_x and kernel_y
+static int
+_gradient_magnitude (struct bmp_image *image, const double *kernel_x,
+                     const double *kernel_y)
 {
+  convert_to_bw (image);
   struct bmp_image *gy = copy_img (image);
   if (gy == NULL)
     {
       return -1;
     }
-  if (v_edge (image) != 0 || h_edge (gy) != 0)
+  if (convolve (image, kernel_x, 3) != 0 || convolve (gy, kernel_y, 3) != 0)
     {
       free_img (gy);
       return -1;
@@ -486,6 +488,37 @@ edge (struct bmp_image *image)
     }
   free_img (gy);
   return 0;
+}
+
+// sobel edge magnitude of the vertical and horizontal edge responses
+int
+edge (struct bmp_image *image)
+{
+  const double kernel_x[3][3] = { { -1, 0, 1 }, { -2, 0, 2 }, { -1, 0, 1 } };
+  const double kernel_y[3][3] = { { -1, -2, -1 }, { 0, 0, 0 }, { 1, 2, 1 } };
+  return _gradient_magnitude (image, &kernel_x[0][0], &kernel_y[0][0]);
+}
+
+// like sobel but weights all neighbours equally, slightly more sensitive to
+// noise
+int
+prewitt_edge (struct bmp_image *image)
+{
+  const double kernel_x[3][3] = { { -1, 0, 1 }, { -1, 0, 1 }, { -1, 0, 1 } };
+  const double kernel_y[3][3] = { { -1, -1, -1 }, { 0, 0, 0 }, { 1, 1, 1 } };
+  return _gradient_magnitude (image, &kernel_x[0][0], &kernel_y[0][0]);
+}
+
+// like sobel but with weights tuned to respond the same to edges at every
+// angle
+int
+scharr_edge (struct bmp_image *image)
+{
+  const double kernel_x[3][3]
+      = { { -3, 0, 3 }, { -10, 0, 10 }, { -3, 0, 3 } };
+  const double kernel_y[3][3]
+      = { { -3, -10, -3 }, { 0, 0, 0 }, { 3, 10, 3 } };
+  return _gradient_magnitude (image, &kernel_x[0][0], &kernel_y[0][0]);
 }
 
 int
