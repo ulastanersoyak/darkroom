@@ -22,3 +22,7 @@ add_test(NAME bmp_image COMMAND test_bmp_image
 
 add_executable(apply_filters examples/apply_filters.c)
 target_link_libraries(apply_filters PRIVATE darkroom)
+
+add_executable(darkroom_cli cli/darkroom.c)
+target_link_libraries(darkroom_cli PRIVATE darkroom)
+set_target_properties(darkroom_cli PROPERTIES OUTPUT_NAME darkroom)
